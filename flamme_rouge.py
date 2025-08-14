@@ -520,7 +520,7 @@ class Humain(Joueur):
         return positions
 
     def jouer(self, tracé):
-        self.client.afficher(tracé)
+        # Note: Track display moved to after movement phase for better flow
         énergies_sprinteur = sorted(
             self._piocher(self.sprinteur, self.défausse_sprinteur))
         énergies_rouleur = sorted(
@@ -1182,6 +1182,8 @@ class Tracé:
         def get_color_name(c):
             return c.name if hasattr(c, 'name') else str(c)
         
+        print("\n=== FATIGUE ASSIGNMENT ===")
+
         for couleur in sorted(fatigués, key=get_color_name):
             color_name = couleur.name if hasattr(couleur, 'name') else str(couleur)
             ligne = "Équipe {}e : fatigue ".format(color_name)
@@ -1191,6 +1193,8 @@ class Tracé:
             if color_name == couleur_joueur:
                 ligne += " <---"
             print(ligne)
+        
+        print("\n")
 
     def ordre(self):
         """Affiche l'ordre des équipes dans la course
@@ -1210,7 +1214,7 @@ class Tracé:
         return couleurs
 
 
-def principal(nb_humains):
+def principal(nb_humains, display_mode='window'):
     tracé, nb_tours = choisir_course(
         os.path.join(os.path.dirname(sys.argv[0]), "courses.json"))
 
@@ -1225,7 +1229,8 @@ def principal(nb_humains):
         yaml_path = team.get("yaml")
         team_type = team.get("type", "robot")
         if team_type == "human":
-            joueurs.append(Humain(color, yaml_path, nb_tours, Console()))
+            console = Console(display_mode)
+            joueurs.append(Humain(color, yaml_path, nb_tours, console))
         else:
             robot_class = random.choice(robot_classes)
             joueurs.append(robot_class(color, yaml_path, nb_tours))
@@ -1295,6 +1300,12 @@ def principal(nb_humains):
 
         # Phase finale
         tracé.aspirer(joueurs)
+        
+        # Show updated track after movement and aspiration
+        for joueur in joueurs:
+            joueur.client.afficher(tracé)
+        
+        # Handle fatigue (without showing track again)
         fatigués = tracé.fatiguer()
         for joueur in joueurs:
             joueur.client.afficher_fatigue(tracé, fatigués)
@@ -1313,8 +1324,46 @@ def client_console(adresse, port):
     client.jouer()
 
 
+def show_help():
+    print("Flamme Rouge - Cycling Race Game")
+    print("Usage: python3 flamme_rouge.py [OPTIONS]")
+    print()
+    print("Options:")
+    print("  -h <num>         Number of human players (1-4, default: 1)")
+    print("  -d <mode>        Display mode (default: window)")
+    print("  --display <mode> Display mode (same as -d)")
+    print("  --help           Show this help message")
+    print()
+    print("Display Modes:")
+    print("  window    Original windowed view showing current race area")
+    print("  full      Complete track in single view (wraps if too wide)")
+    print("  wrapped   Multi-line display for very long tracks")
+    print("  overview  Compressed overview with detailed current section")
+    print()
+    print("Examples:")
+    print("  python3 flamme_rouge.py")
+    print("  python3 flamme_rouge.py -d full")
+    print("  python3 flamme_rouge.py --display wrapped")
+    print("  python3 flamme_rouge.py -h 2 -d overview")
+    print("  python3 flamme_rouge.py full  # Direct mode specification")
+    print()
+    print("Client Mode:")
+    print("  python3 flamme_rouge.py <port>")
+    print("  python3 flamme_rouge.py -c <host> <port>")
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.WARNING)
+    
+    # Check for help
+    if '--help' in sys.argv or 'help' in sys.argv:
+        show_help()
+        sys.exit(0)
+    
+    # Parse command-line arguments for display mode
+    display_mode = 'overview'  # default
+    valid_modes = ['window', 'full', 'wrapped', 'overview']
+    
     if len(sys.argv) == 2 or (len(sys.argv) > 2 and sys.argv[1] == '-c'):
         if len(sys.argv) == 3:
             client_console(socket.gethostname(), int(sys.argv[2]))
@@ -1322,9 +1371,39 @@ if __name__ == "__main__":
             client_console(sys.argv[2], int(sys.argv[3]))
         else:
             client_console(socket.gethostname(), int(sys.argv[1]))
-
     else:
         nb_humains = 1
-        if len(sys.argv) > 2 and sys.argv[1] == '-h':
-            nb_humains = min(4, max(1, int(sys.argv[2])))
-        principal(nb_humains)
+        
+        # Check for display mode argument
+        args = sys.argv[1:]
+        if '-d' in args or '--display' in args:
+            try:
+                display_idx = args.index('-d') if '-d' in args else args.index('--display')
+                if display_idx + 1 < len(args):
+                    mode = args[display_idx + 1]
+                    if mode in valid_modes:
+                        display_mode = mode
+                        print(f"Display mode set to: {display_mode}")
+                    else:
+                        print(f"Invalid display mode '{mode}'. Valid modes: {', '.join(valid_modes)}")
+                        print("Using default 'window' mode.")
+            except (ValueError, IndexError):
+                print("Display mode argument error. Using default 'window' mode.")
+        
+        # Check for direct mode argument (backward compatibility)
+        for arg in args:
+            if arg in valid_modes:
+                display_mode = arg
+                print(f"Display mode set to: {display_mode}")
+                break
+        
+        # Check for human players argument
+        if '-h' in args:
+            try:
+                h_idx = args.index('-h')
+                if h_idx + 1 < len(args):
+                    nb_humains = min(4, max(1, int(args[h_idx + 1])))
+            except (ValueError, IndexError):
+                pass
+        
+        principal(nb_humains, display_mode)
