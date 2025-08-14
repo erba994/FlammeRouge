@@ -318,11 +318,23 @@ class ServeurConsole(Client, ClientServeur):
 
 
 class Console(Client):
+    def __init__(self, display_mode='window'):
+        self.display_mode = display_mode
+        
     def afficher(self, tracé, début=None, garde=None, aspiration=list()):
         if début is None:
             print("\n")
 
-        tracé.afficher(début, garde, aspiration)
+        # Use the configured display mode
+        tracé.afficher(début, garde, aspiration, mode=self.display_mode)
+
+    def set_display_mode(self, mode):
+        """Set the display mode: 'window', 'full', 'wrapped', 'overview'"""
+        if mode in ['window', 'full', 'wrapped', 'overview']:
+            self.display_mode = mode
+            print(f"Display mode set to: {mode}")
+        else:
+            print(f"Invalid display mode: {mode}. Valid modes: window, full, wrapped, overview")
 
     def afficher_fatigue(self, tracé, fatigués):
         tracé.afficher_fatigue(fatigués, self.couleur)
@@ -674,7 +686,11 @@ class Rofinot(Joueur):
         if tracé.cases[index_sprinteur].pente == Pente.descente:
             sprinteur = min(énergies_sprinteur)
         else:
+            és = énergies_sprinteur  # Default to all energies
             for d in range(1, 10):
+                # Check if the position is within track bounds
+                if index_sprinteur + d >= len(tracé.cases):
+                    break
                 if tracé.cases[index_sprinteur + d].pente == Pente.col:
                     if d <= 5:
                         max_sprinteur = 5
@@ -685,14 +701,16 @@ class Rofinot(Joueur):
                     if len(és) == 0:
                         és = [min(énergies_sprinteur)]
                     break
-            else:
-                és = énergies_sprinteur
             sprinteur = max(és)
 
         if tracé.cases[index_rouleur].pente == Pente.descente:
             rouleur = min(énergies_rouleur)
         else:
+            ér = énergies_rouleur  # Default to all energies
             for d in range(1, 10):
+                # Check if the position is within track bounds
+                if index_rouleur + d >= len(tracé.cases):
+                    break
                 if tracé.cases[index_rouleur + d].pente == Pente.col:
                     if d <= 5:
                         max_rouleur = 5
@@ -703,8 +721,6 @@ class Rofinot(Joueur):
                     if len(ér) == 0:
                         ér = [min(énergies_rouleur)]
                     break
-            else:
-                ér = énergies_rouleur
             rouleur = max(ér)
 
         énergies_sprinteur.remove(sprinteur)
@@ -815,7 +831,29 @@ class Tracé:
         self.cases[self.positions[pion]].retirer(pion)
         del self.positions[pion]
 
-    def afficher(self, début=None, garde=None, aspiration=list()):
+    def afficher(self, début=None, garde=None, aspiration=list(), 
+                mode='window', max_width=80, show_full=False):
+        """Display the track with various modes
+        
+        Args:
+            début: Start position (for window mode)
+            garde: End position (for window mode)  
+            aspiration: List of aspiration positions
+            mode: Display mode - 'window', 'full', 'wrapped', 'overview'
+            max_width: Maximum terminal width for wrapped mode
+            show_full: Legacy parameter for backward compatibility
+        """
+        if mode == 'full' or show_full:
+            self._afficher_full_track(aspiration, max_width)
+        elif mode == 'wrapped':
+            self._afficher_wrapped_track(aspiration, max_width)
+        elif mode == 'overview':
+            self._afficher_overview_track(aspiration, max_width)
+        else:  # mode == 'window' or default
+            self._afficher_window_track(début, garde, aspiration)
+
+    def _afficher_window_track(self, début=None, garde=None, aspiration=list()):
+        """Original windowed display - maintains backward compatibility"""
         if début is None:
             début = min(self.positions.values(), default=0)
         if garde is None:
@@ -912,15 +950,114 @@ class Tracé:
         print(ligne)
 
         # Changement de pente
+        self._afficher_terrain_info(garde)
+
+    def _afficher_full_track(self, aspiration=list(), max_width=80):
+        """Display the complete track in a single view"""
+        début = 0
+        garde = len(self.cases)
+        
+        # Calculate if track fits in terminal width
+        track_width = (garde - début) * 5 + 1  # 5 chars per case + final border
+        
+        if track_width <= max_width:
+            # Track fits in single line
+            self._afficher_window_track(début, garde, aspiration)
+        else:
+            # Track too wide, use wrapped mode
+            self._afficher_wrapped_track(aspiration, max_width)
+
+    def _afficher_wrapped_track(self, aspiration=list(), max_width=80):
+        """Display track with line wrapping for long tracks"""
+        début = 0
+        garde = len(self.cases)
+        
+        # Calculate cases per line (accounting for borders)
+        cases_per_line = (max_width - 1) // 5  # 5 chars per case
+        if cases_per_line < 10:  # Minimum reasonable display
+            cases_per_line = 10
+            
+        print(f"=== FULL TRACK DISPLAY ({garde - début} cases) ===")
+        
+        # Display track in segments
+        for segment_start in range(début, garde, cases_per_line):
+            segment_end = min(segment_start + cases_per_line, garde)
+            
+            print(f"\n--- Cases {segment_start - self.départ} to {segment_end - 1 - self.départ} ---")
+            self._afficher_window_track(segment_start, segment_end, aspiration)
+
+    def _afficher_overview_track(self, aspiration=list(), max_width=80):
+        """Display compressed overview with detailed current section"""
+        if not self.positions:
+            # No riders, show full track
+            self._afficher_full_track(aspiration, max_width)
+            return
+            
+        # Find rider positions
+        min_pos = min(self.positions.values())
+        max_pos = max(self.positions.values())
+        
+        # Show detailed view around riders
+        detail_start = max(0, min_pos - 5)
+        detail_end = min(len(self.cases), max_pos + 10)
+        
+        print("=== RACE OVERVIEW ===")
+        print(f"Full track: 0 to {len(self.cases) - 1 - self.départ} km")
+        print(f"Riders between km {min_pos - self.départ} and {max_pos - self.départ}")
+        print()
+        print("=== DETAILED VIEW (Current Race Position) ===")
+        self._afficher_window_track(detail_start, detail_end, aspiration)
+        
+        # Show compressed full track overview
+        print("\n=== COMPRESSED TRACK OVERVIEW ===")
+        self._afficher_compressed_overview()
+
+    def _afficher_compressed_overview(self):
+        """Show a compressed view of the entire track"""
+        # Create a simplified track representation
+        track_repr = []
+        
+        for i in range(len(self.cases)):
+            if self.est_flamme(i):
+                symbol = "F"  # Flame rouge
+            elif self.cases[i].pente == Pente.col:
+                symbol = "^"  # Climb
+            elif self.cases[i].pente == Pente.descente:
+                symbol = "v"  # Descent
+            else:
+                symbol = "-"  # Flat
+                
+            # Mark rider positions
+            if any(pos == i for pos in self.positions.values()):
+                symbol = "*"  # Riders here
+                
+            track_repr.append(symbol)
+        
+        # Display in chunks
+        chunk_size = 70
+        for i in range(0, len(track_repr), chunk_size):
+            chunk = track_repr[i:i + chunk_size]
+            km_start = i - self.départ
+            km_end = min(i + chunk_size - 1, len(track_repr) - 1) - self.départ
+            print(f"km {km_start:3d}-{km_end:3d}: {''.join(chunk)}")
+        
+        print("\nLegend: F=Flame Rouge, ^=Climb, v=Descent, -=Flat, *=Riders")
+
+    def _afficher_terrain_info(self, garde):
+        """Display terrain change information (extracted from original method)"""
+        if garde >= len(self.cases):
+            return  # No terrain info beyond track end
+            
         for i in range(garde, len(self.cases)):
             ligne = None
             if i == self.arrivée:
                 ligne = " Arrivée au km {}".format(i - self.départ)
-            elif self.cases[garde - 1].pente != self.cases[i].pente:
+            elif garde > 0 and garde <= len(self.cases) and i < len(self.cases) and self.cases[garde - 1].pente != self.cases[i].pente:
                 ligne = " Prochain point d'étape au km {} : ".format(
                     i - self.départ)
                 j = i + 1
                 while (j < self.arrivée
+                       and j < len(self.cases)
                        and self.cases[j].pente == self.cases[i].pente):
                     j += 1
                 if self.cases[i].pente == Pente.col:
