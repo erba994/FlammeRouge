@@ -43,6 +43,7 @@ import logging
 import os.path
 import pickle
 import random
+import yaml
 import socket
 import sys
 import threading
@@ -199,7 +200,11 @@ class Client:
         raise NotImplementedError
 
     def couleur(self, couleur):
-        self.couleur = couleur.name
+        # Accept both enum and string, but use string directly
+        if hasattr(couleur, 'name'):
+            self.couleur = couleur.name
+        else:
+            self.couleur = str(couleur)
 
 
 class ClientNul(Client):
@@ -373,8 +378,10 @@ class Console(Client):
 
     def ordre(self, couleurs):
         for i in range(len(couleurs)):
-            ligne = "N°{} : équipe {}e".format(i + 1, couleurs[i].name)
-            if couleurs[i].name == self.couleur:
+            # Handle both enum and string colors
+            color_name = couleurs[i].name if hasattr(couleurs[i], 'name') else str(couleurs[i])
+            ligne = "N°{} : équipe {}e".format(i + 1, color_name)
+            if color_name == self.couleur:
                 ligne += " <---"
             print(ligne)
 
@@ -383,8 +390,13 @@ class Console(Client):
                                              ", ".join(couleurs)))
 
     def couleur(self, couleur):
-        self.couleur = couleur.name
-        print("Vous êtes le joueur {}".format(couleur.name))
+        # Accept both enum and string, but use string directly
+        if hasattr(couleur, 'name'):
+            self.couleur = couleur.name
+            print("Vous êtes le joueur {}".format(couleur.name))
+        else:
+            self.couleur = str(couleur)
+            print("Vous êtes le joueur {}".format(couleur))
 
 
 class ClientConsole(Console, ClientServeur):
@@ -429,13 +441,14 @@ class ClientConsole(Console, ClientServeur):
 
 
 class Joueur:
-    def __init__(self, couleur, nb_tours):
+    def __init__(self, couleur, team_yaml_path, nb_tours):
+        # Load team configuration from YAML file
+        with open(team_yaml_path, 'r') as f:
+            team_cfg = yaml.safe_load(f)
         self.couleur = couleur
         self.client = ClientNul()
-        self.sprinteur = [2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 9, 9, 9]
-        self.sprinteur = nb_tours * self.sprinteur
-        self.rouleur = [3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 7]
-        self.rouleur = nb_tours * self.rouleur
+        self.sprinteur = nb_tours * team_cfg.get('sprinteur', [])
+        self.rouleur = nb_tours * team_cfg.get('rouleur', [])
         self.défausse_sprinteur = []
         self.défausse_rouleur = []
         random.shuffle(self.sprinteur)
@@ -467,8 +480,8 @@ class Joueur:
 
 
 class Humain(Joueur):
-    def __init__(self, couleur, nb_tours, client):
-        super().__init__(couleur, nb_tours)
+    def __init__(self, couleur, team_yaml_path, nb_tours, client):
+        super().__init__(couleur, team_yaml_path, nb_tours)
         self.client = client
 
     def placer(self, tracé):
@@ -523,6 +536,9 @@ class Robot(Joueur):
     """Robot qui joue au pif
     """
 
+    def __init__(self, couleur, team_yaml_path, nb_tours):
+        super().__init__(couleur, team_yaml_path, nb_tours)
+
     def placer(self, tracé):
         libres = list()
         for i in range(tracé.départ):
@@ -552,6 +568,9 @@ class Robot(Joueur):
 
 
 class Robomou(Robot):
+    def __init__(self, couleur, team_yaml_path, nb_tours):
+        super().__init__(couleur, team_yaml_path, nb_tours)
+
     def jouer(self, tracé):
         énergies_sprinteur = self._piocher(self.sprinteur,
                                            self.défausse_sprinteur)
@@ -610,6 +629,9 @@ class Robourrin(Joueur):
     """Robot qui joue tout ce qu'il a de plus fort
     """
 
+    def __init__(self, couleur, team_yaml_path, nb_tours):
+        super().__init__(couleur, team_yaml_path, nb_tours)
+
     def placer(self, tracé):
         return Paire(tracé.départ - 1, tracé.départ - 1)
 
@@ -633,6 +655,9 @@ class Robourrin(Joueur):
 class Rofinot(Joueur):
     """Robot qui joue tout ce qu'il a de plus fort, sans effort inutile
     """
+
+    def __init__(self, couleur, team_yaml_path, nb_tours):
+        super().__init__(couleur, team_yaml_path, nb_tours)
 
     def placer(self, tracé):
         return Paire(tracé.départ - 1, tracé.départ - 1)
@@ -737,7 +762,9 @@ class Profil(enum.Enum):
 class Pion(collections.namedtuple("Pion", ["profil", "joueur"])):
     def __str__(self):
         retour = self.profil.name[0].upper()
-        retour += self.joueur.couleur.name[0].lower()
+        # Handle string colors properly
+        color_name = self.joueur.couleur if isinstance(self.joueur.couleur, str) else self.joueur.couleur.name
+        retour += color_name[0].lower()
 
         return retour
 
@@ -1014,12 +1041,17 @@ class Tracé:
         return fatigués
 
     def afficher_fatigue(self, fatigués, couleur_joueur):
-        for couleur in sorted(fatigués, key=lambda c: c.name):
-            ligne = "Équipe {}e : fatigue ".format(couleur.name)
+        # Handle both string and enum colors for sorting
+        def get_color_name(c):
+            return c.name if hasattr(c, 'name') else str(c)
+        
+        for couleur in sorted(fatigués, key=get_color_name):
+            color_name = couleur.name if hasattr(couleur, 'name') else str(couleur)
+            ligne = "Équipe {}e : fatigue ".format(color_name)
             coureurs = sorted(fatigués[couleur], key=str)
             ligne += " et ".join(
                 ["du {}".format(x.profil.name) for x in coureurs])
-            if couleur.name == couleur_joueur:
+            if color_name == couleur_joueur:
                 ligne += " <---"
             print(ligne)
 
@@ -1045,22 +1077,21 @@ def principal(nb_humains):
     tracé, nb_tours = choisir_course(
         os.path.join(os.path.dirname(sys.argv[0]), "courses.json"))
 
-    couleurs = [Couleur.gris, Couleur.bleu, Couleur.noir, Couleur.vert]
-    joueurs = list()
-    joueurs.append(Humain(couleurs[0], nb_tours, Console()))
-    tâches = list()
-    for i in range(1, nb_humains):
-        tâche = threading.Thread(target=lambda j, c: j.append(
-            Humain(c, nb_tours, ServeurConsole())),
-            args=(joueurs, couleurs[i]))
-        tâche.start()
-        tâches.append(tâche)
-    for tâche in tâches:
-        tâche.join()
-    for i in range(nb_humains, 4):
-        genre = random.sample([Robot, Robourrin, Robomou, Rofinot], 1)[0]
-        joueurs.append(genre(couleurs[i], nb_tours))
-    random.shuffle(joueurs)
+    import yaml
+    config_path = os.path.join(os.path.dirname(sys.argv[0]), "game_config.yaml")
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f)
+    joueurs = []
+    robot_classes = [Robot, Robourrin, Robomou, Rofinot]
+    for team in config.get("teams", []):
+        color = team.get("color", "unknown")
+        yaml_path = team.get("yaml")
+        team_type = team.get("type", "robot")
+        if team_type == "human":
+            joueurs.append(Humain(color, yaml_path, nb_tours, Console()))
+        else:
+            robot_class = random.choice(robot_classes)
+            joueurs.append(robot_class(color, yaml_path, nb_tours))
     for joueur in joueurs:
         joueur.client.couleur(joueur.couleur)
 
@@ -1069,7 +1100,9 @@ def principal(nb_humains):
     for joueur in joueurs:
         for joueur_en_attente in joueurs:
             if joueur_en_attente is not joueur:
-                joueur_en_attente.client.attente(list([joueur.couleur.name]))
+                # Handle string colors properly
+                color_name = joueur.couleur if isinstance(joueur.couleur, str) else joueur.couleur.name
+                joueur_en_attente.client.attente(list([color_name]))
         paire = joueur.placer(tracé)
         if paire.sprinteur >= paire.rouleur:
             pion = Pion(Profil.sprinteur, joueur)
@@ -1101,13 +1134,14 @@ def principal(nb_humains):
                 tâches[joueur].start()
 
         attendre_couleurs_precedentes = list(
-            map(lambda j: j.couleur.name, joueurs))
+            map(lambda j: j.couleur if isinstance(j.couleur, str) else j.couleur.name, joueurs))
         while True:
             time.sleep(1)
             attendre_couleurs = list()
             for joueur in joueurs:
                 if joueur not in paires:
-                    attendre_couleurs.append(joueur.couleur.name)
+                    color_name = joueur.couleur if isinstance(joueur.couleur, str) else joueur.couleur.name
+                    attendre_couleurs.append(color_name)
             if not attendre_couleurs:
                 break
             else:

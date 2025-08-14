@@ -1,0 +1,19 @@
+# Flamme Rouge game configuration
+# List all teams, their color, yaml file, and type (human/robot)
+teams:
+  - name: TeamBlue
+    color: blue
+    yaml: teams/team1.yaml
+    type: human
+  - name: TeamRed
+    color: red
+    yaml: teams/team2.yaml
+    type: robot
+  - name: TeamGreen
+    color: green
+    yaml: teams/team3.yaml
+    type: robot
+  - name: TeamBlack
+    color: black
+    yaml: teams/team4.yaml
+    type: robot
