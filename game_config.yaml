@@ -14,6 +14,6 @@ teams:
     yaml: teams/team3.yaml
     type: robot
   - name: TeamBlack
-    color: black
+    color: white
     yaml: teams/team4.yaml
     type: robot
